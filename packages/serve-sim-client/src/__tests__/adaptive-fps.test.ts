@@ -87,8 +87,21 @@ describe("Adaptive FPS", () => {
     expect(setFpsMsgs[0].maxFps).toBe(15);
   });
 
+  test("streamSetFps inherits the active stream device", async () => {
+    transport.streamStart({ device: "DEVICE-A" });
+    await sleep(30);
+    server.messages.length = 0;
+
+    transport.streamSetFps(15);
+    await sleep(50);
+
+    const setFpsMsgs = server.messages.filter((m) => m.type === "stream:set-fps");
+    expect(setFpsMsgs.length).toBe(1);
+    expect(setFpsMsgs[0].device).toBe("DEVICE-A");
+  });
+
   test("adaptiveFps starts at 30 after streamStart", () => {
-    transport.streamStart();
+    transport.streamStart({ device: "DEVICE-A" });
     expect(transport.adaptiveFps).toBe(30);
     expect(transport.adaptiveState).toBe("normal");
   });
@@ -214,7 +227,7 @@ describe("Adaptive FPS", () => {
   });
 
   test("stream:set-fps messages are sent to server on degradation", async () => {
-    transport.streamStart();
+    transport.streamStart({ device: "DEVICE-A" });
     await sleep(30);
     server.messages.length = 0; // clear stream:start
 
@@ -234,5 +247,6 @@ describe("Adaptive FPS", () => {
     const setFpsMsgs = server.messages.filter((m) => m.type === "stream:set-fps");
     expect(setFpsMsgs.length).toBeGreaterThanOrEqual(1);
     expect(setFpsMsgs[0].maxFps).toBe(15);
+    expect(setFpsMsgs[0].device).toBe("DEVICE-A");
   });
 });

@@ -21,11 +21,11 @@ export interface HistoryEntry {
 }
 
 export interface StreamAPI {
-  start: (options?: { maxFps?: number }) => void;
-  stop: () => void;
-  sendTouch: (data: { type: "begin" | "move" | "end"; x: number; y: number; edge?: number }) => void;
-  sendMultiTouch: (data: { type: "begin" | "move" | "end"; x1: number; y1: number; x2: number; y2: number }) => void;
-  sendButton: (button: string) => void;
+  start: (options?: { maxFps?: number; device?: string }) => void;
+  stop: (device?: string) => void;
+  sendTouch: (data: { type: "begin" | "move" | "end"; x: number; y: number; edge?: number }, device?: string) => void;
+  sendMultiTouch: (data: { type: "begin" | "move" | "end"; x1: number; y1: number; x2: number; y2: number }, device?: string) => void;
+  sendButton: (button: string, device?: string) => void;
   /** Subscribe to frame updates (bypasses React state for performance). Returns unsubscribe fn.
    * Callback receives a blob URL (object URL) pointing to the JPEG frame. */
   subscribeFrame: (cb: (blobUrl: string) => void) => () => void;
@@ -163,10 +163,10 @@ export function useGateway(options: UseGatewayOptions): UseGatewayResult {
 
   const stream: StreamAPI = useMemo(() => ({
     start: (options) => shellRef.current?.transport.streamStart(options),
-    stop: () => shellRef.current?.transport.streamStop(),
-    sendTouch: (data) => shellRef.current?.transport.streamTouch(data),
-    sendMultiTouch: (data) => shellRef.current?.transport.streamMultiTouch(data),
-    sendButton: (button) => shellRef.current?.transport.streamButton(button),
+    stop: (device) => shellRef.current?.transport.streamStop(device),
+    sendTouch: (data, device) => shellRef.current?.transport.streamTouch(data, device),
+    sendMultiTouch: (data, device) => shellRef.current?.transport.streamMultiTouch(data, device),
+    sendButton: (button, device) => shellRef.current?.transport.streamButton(button, device),
     subscribeFrame,
     get frame() { return streamFrameRef.current; },
     config: streamConfig,

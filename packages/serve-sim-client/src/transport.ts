@@ -110,6 +110,7 @@ export class GatewayTransport {
   private _currentFps: number = ADAPTIVE_MAX_FPS;
   private _highWaterCount = 0;
   private _lowWaterCount = 0;
+  private _streamDevice: string | undefined;
 
   // Connection quality tracking
   private lastFrameTime: number | null = null;
@@ -485,6 +486,7 @@ export class GatewayTransport {
     this._adaptiveState = "normal";
     this._highWaterCount = 0;
     this._lowWaterCount = 0;
+    this._streamDevice = options?.device;
     const msg: any = { type: "stream:start" };
     if (options?.maxFps) msg.maxFps = options.maxFps;
     if (options?.device) msg.device = options.device;
@@ -495,11 +497,13 @@ export class GatewayTransport {
     const msg: any = { type: "stream:stop" };
     if (device) msg.device = device;
     this.ws.send(JSON.stringify(msg));
+    if (!device || device === this._streamDevice) this._streamDevice = undefined;
   }
 
   streamSetFps(maxFps: number, device?: string): void {
     const msg: any = { type: "stream:set-fps", maxFps };
-    if (device) msg.device = device;
+    const targetDevice = device ?? this._streamDevice;
+    if (targetDevice) msg.device = targetDevice;
     this.ws.send(JSON.stringify(msg));
   }
 

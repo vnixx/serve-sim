@@ -190,19 +190,21 @@ function helperSpawnEnv(): NodeJS.ProcessEnv {
 
 // ─── Device helpers ───
 
-function findBootedDevice(): string | null {
+function findBootedDevices(): string[] {
   try {
     const output = execSync("xcrun simctl list devices booted -j", { encoding: "utf-8" });
     const data = JSON.parse(output) as {
       devices: Record<string, Array<{ udid: string; name: string; state: string }>>;
     };
+    const udids: string[] = [];
     for (const runtime of Object.values(data.devices)) {
       for (const device of runtime) {
-        if (device.state === "Booted") return device.udid;
+        if (device.state === "Booted") udids.push(device.udid);
       }
     }
+    return udids;
   } catch {}
-  return null;
+  return [];
 }
 
 /**
@@ -580,8 +582,8 @@ async function follow(devices: string[], startPort: number, quiet: boolean) {
   const udids = devices.length > 0
     ? devices.map(resolveDevice)
     : (() => {
-        const booted = findBootedDevice();
-        if (booted) return [booted];
+        const booted = findBootedDevices();
+        if (booted.length > 0) return booted;
         const fallback = pickDefaultDevice();
         if (!fallback) {
           console.error("No device specified and no available iOS simulator found.");
@@ -706,8 +708,8 @@ async function detach(devices: string[], startPort: number): Promise<ServerState
   const udids = devices.length > 0
     ? devices.map(resolveDevice)
     : (() => {
-        const booted = findBootedDevice();
-        if (booted) return [booted];
+        const booted = findBootedDevices();
+        if (booted.length > 0) return booted;
         const fallback = pickDefaultDevice();
         if (!fallback) {
           console.error("No device specified and no available iOS simulator found.");
@@ -1049,26 +1051,22 @@ async function memoryWarning(args: string[]) {
 
 // ─── Serve preview ───
 
-async function serve(servePort: number, devices: string[], portExplicit: boolean) {
-  let targetDevice: string | undefined;
+function previewDevicePath(device: string): string {
+  return `/devices/${encodeURIComponent(device)}`;
+}
 
-  if (devices.length > 0) {
-    const states = await detach(devices, 3100);
-    targetDevice = states[0]?.device;
-  } else {
-    // Ensure a serve-sim stream is running (start one if not)
-    const existing = readAllStates();
-    if (existing.length > 0) {
-      targetDevice = existing[0]?.device;
-    } else {
-      console.log("Starting simulator stream...");
-      const states = await detach(devices, 3100);
-      targetDevice = states[0]?.device;
-    }
+async function serve(servePort: number, devices: string[], portExplicit: boolean) {
+  if (devices.length === 0 && readAllStates().length === 0) {
+    console.log("Starting simulator stream...");
   }
+  const states = await detach(devices, 3100);
+  const targetDevice = states[0]?.device;
 
   const { simMiddleware } = await import("./middleware");
-  const middleware = simMiddleware({ basePath: "/", device: targetDevice });
+  const middleware = simMiddleware({
+    basePath: "/",
+    device: devices.length === 1 ? targetDevice : undefined,
+  });
 
   // Try requested port; if busy and the user didn't pin it, scan forward.
   const maxScan = portExplicit ? 1 : 50;
@@ -1104,6 +1102,16 @@ async function serve(servePort: number, devices: string[], portExplicit: boolean
   console.log("");
   console.log(`  - Local:   http://localhost:${boundPort}`);
   if (networkIP) console.log(`  - Network: http://${networkIP}:${boundPort}`);
+  if (states.length > 0) {
+    console.log("");
+    console.log("  Device URLs:");
+    for (const state of states) {
+      const name = getDeviceName(state.device) ?? state.device;
+      const path = previewDevicePath(state.device);
+      console.log(`  - ${name}: http://localhost:${boundPort}${path}`);
+      if (networkIP) console.log(`    LAN:     http://${networkIP}:${boundPort}${path}`);
+    }
+  }
   console.log("");
 
   // Exit cleanly on Ctrl+C

@@ -217,12 +217,29 @@ declare global {
       appStateEndpoint?: string;
       devtoolsEndpoint?: string;
     };
+    __SIM_PREVIEW_INDEX__?: {
+      basePath: string;
+      streams: Array<{
+        url: string;
+        streamUrl: string;
+        wsUrl: string;
+        port: number;
+        device: string;
+        previewUrl: string;
+      }>;
+    };
   }
 }
 
 function simEndpoint(path: string): string {
-  const basePath = window.__SIM_PREVIEW__?.basePath ?? "/";
+  const basePath = window.__SIM_PREVIEW__?.basePath ?? window.__SIM_PREVIEW_INDEX__?.basePath ?? "/";
   return basePath === "/" ? `/${path}` : `${basePath}/${path}`;
+}
+
+function simPreviewUrl(device: string): string {
+  const basePath = window.__SIM_PREVIEW__?.basePath ?? window.__SIM_PREVIEW_INDEX__?.basePath ?? "/";
+  const path = `/devices/${encodeURIComponent(device)}`;
+  return basePath === "/" ? path : `${basePath}${path}`;
 }
 
 function isAxeUnavailable(snapshot: AxSnapshot | null) {
@@ -1484,11 +1501,13 @@ function AppPermissionsTool({
 
 function BootEmptyState({
   devices,
+  runningStreams,
   loading,
   error,
   onRefresh,
 }: {
   devices: SimDevice[];
+  runningStreams?: NonNullable<typeof window.__SIM_PREVIEW_INDEX__>["streams"];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -1517,9 +1536,7 @@ function BootEmptyState({
         try {
           const r = await fetch(apiUrl, { cache: "no-store" });
           if (r.ok && (await r.json())) {
-            const nextUrl = new URL(window.location.href);
-            nextUrl.searchParams.set("device", d.udid);
-            window.location.assign(nextUrl.toString());
+            window.location.assign(simPreviewUrl(d.udid));
             return;
           }
         } catch {}
@@ -1554,11 +1571,44 @@ function BootEmptyState({
   return (
     <div style={s.page}>
       <div style={s.empty}>
-        <h1 style={s.emptyTitle}>No serve-sim stream running</h1>
+        <h1 style={s.emptyTitle}>
+          {runningStreams?.length ? "serve-sim devices" : "No serve-sim stream running"}
+        </h1>
         <p style={s.emptyHint}>
-          Pick a simulator to boot, or start one yourself with{" "}
-          <code style={s.code}>bunx serve-sim --detach</code>.
+          {runningStreams?.length
+            ? "Open a running simulator, or start another stream below."
+            : (
+              <>
+                Pick a simulator to boot, or start one yourself with{" "}
+                <code style={s.code}>bunx serve-sim --detach</code>.
+              </>
+            )}
         </p>
+        {!!runningStreams?.length && (
+          <div style={bootListStyle}>
+            <div style={pickerHeaderStyle}>
+              <span style={{ fontWeight: 600 }}>Running streams</span>
+            </div>
+            {runningStreams.map((stream) => {
+              const device = devices.find((d) => d.udid === stream.device);
+              return (
+                <a
+                  key={stream.device}
+                  href={stream.previewUrl}
+                  style={{ ...pickerItemStyle, color: "inherit", textDecoration: "none" }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+                  }}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span style={dotStyle("#4ade80")} />
+                  <span style={{ flex: 1, textAlign: "left" }}>{device?.name ?? stream.device}</span>
+                  <span style={{ fontSize: 10, color: "#888" }}>:{stream.port}</span>
+                </a>
+              );
+            })}
+          </div>
+        )}
         <div style={bootListStyle}>
           <div style={pickerHeaderStyle}>
             <span style={{ fontWeight: 600 }}>Simulators</span>
@@ -2118,6 +2168,7 @@ const bootListStyle: CSSProperties = {
 
 function App() {
   const config = window.__SIM_PREVIEW__;
+  const indexConfig = window.__SIM_PREVIEW_INDEX__;
   const [streaming, setStreaming] = useState(false);
   const [devices, setDevices] = useState<SimDevice[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(false);
@@ -2218,6 +2269,7 @@ function App() {
     return (
       <BootEmptyState
         devices={devices}
+        runningStreams={indexConfig?.streams}
         loading={devicesLoading}
         error={devicesError}
         onRefresh={fetchDevices}

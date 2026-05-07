@@ -31,6 +31,10 @@ export interface UseSimStreamResult {
   sendButton: (button: string) => Promise<void>;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function useSimStream({ exec, device: deviceProp }: UseSimStreamOptions): UseSimStreamResult {
   const [info, setInfo] = useState<SimStreamInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,12 +69,13 @@ export function useSimStream({ exec, device: deviceProp }: UseSimStreamOptions):
       setError(null);
       try {
         if (!deviceProp) {
-          // No device selected — just disconnect
-          await exec("serve-sim --kill");
+          // No device selected — stop only this hook's active stream.
+          const active = infoRef.current?.device;
+          if (active) await exec(`serve-sim --kill ${shellQuote(active)}`);
           if (mountedRef.current) setInfo(null);
           return;
         }
-        const result = await exec(`serve-sim --detach ${deviceProp}`);
+        const result = await exec(`serve-sim --detach ${shellQuote(deviceProp)}`);
         if (cancelled) return;
         if (result.exitCode !== 0) {
           throw new Error(result.stderr || `serve-sim --detach failed (exit ${result.exitCode})`);
@@ -97,7 +102,7 @@ export function useSimStream({ exec, device: deviceProp }: UseSimStreamOptions):
     try {
       const target = device ?? deviceProp ?? undefined;
       let cmd = "serve-sim --detach";
-      if (target) cmd += ` ${target}`;
+      if (target) cmd += ` ${shellQuote(target)}`;
       if (port) cmd += ` --port ${port}`;
 
       const result = await exec(cmd);
@@ -122,7 +127,10 @@ export function useSimStream({ exec, device: deviceProp }: UseSimStreamOptions):
     setLoading(true);
     setError(null);
     try {
-      await exec("serve-sim --kill");
+      const active = infoRef.current?.device;
+      if (active) {
+        await exec(`serve-sim --kill ${shellQuote(active)}`);
+      }
       if (mountedRef.current) setInfo(null);
     } catch (err) {
       if (mountedRef.current) {
@@ -135,7 +143,9 @@ export function useSimStream({ exec, device: deviceProp }: UseSimStreamOptions):
 
   const sendButton = useCallback(async (button: string) => {
     try {
-      await exec(`serve-sim button ${button}`);
+      const active = infoRef.current?.device;
+      const suffix = active ? ` -d ${shellQuote(active)}` : "";
+      await exec(`serve-sim button ${shellQuote(button)}${suffix}`);
     } catch {
       // best-effort
     }

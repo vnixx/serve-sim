@@ -162,15 +162,59 @@ export function selectServeSimState(
   return states[0] ?? null;
 }
 
+export function deviceFromPreviewPath(url: string, base: string): string | null {
+  const prefix = base === "" ? "" : base;
+  if (prefix && url !== prefix && !url.startsWith(`${prefix}/`)) return null;
+  const path = prefix ? url.slice(prefix.length) || "/" : url;
+  const match = /^\/devices?\/([^/]+)\/?$/.exec(path);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+}
+
 function queryDevice(rawUrl: string): string | null {
   const qIndex = rawUrl.indexOf("?");
   if (qIndex === -1) return null;
   return new URLSearchParams(rawUrl.slice(qIndex + 1)).get("device");
 }
 
+function requestHostname(req: any): string | null {
+  const host = typeof req.headers?.host === "string" ? req.headers.host : "";
+  if (!host) return null;
+  if (host.startsWith("[")) return host.slice(1, host.indexOf("]"));
+  return host.split(":")[0] || null;
+}
+
+export function browserReachableState(
+  state: ServeSimState,
+  req: any,
+): ServeSimState {
+  const hostname = requestHostname(req);
+  if (!hostname) return state;
+  const forwardedProto = String(req.headers?.["x-forwarded-proto"] ?? "").split(",")[0]?.trim();
+  const isHttps = forwardedProto === "https" || req.socket?.encrypted === true;
+  const httpProtocol = isHttps ? "https" : "http";
+  const wsProtocol = isHttps ? "wss" : "ws";
+  const authority = hostname.includes(":") ? `[${hostname}]:${state.port}` : `${hostname}:${state.port}`;
+  return {
+    ...state,
+    url: `${httpProtocol}://${authority}`,
+    streamUrl: `${httpProtocol}://${authority}/stream.mjpeg`,
+    wsUrl: `${wsProtocol}://${authority}/ws`,
+  };
+}
+
 function endpoint(base: string, path: string, device: string): string {
   const value = `${base}${path}`;
   return `${value}?device=${encodeURIComponent(device)}`;
+}
+
+function previewEndpoint(base: string, device: string): string {
+  const path = `/devices/${encodeURIComponent(device)}`;
+  return base === "/" ? path : `${base}${path}`;
 }
 
 async function isLocalPortFree(port: number): Promise<boolean> {
@@ -337,7 +381,7 @@ export function simMiddleware(options?: SimMiddlewareOptions) {
     const rawUrl: string = req.url ?? "";
     const qIndex = rawUrl.indexOf("?");
     const url = qIndex === -1 ? rawUrl : rawUrl.slice(0, qIndex);
-    const selectedDevice = queryDevice(rawUrl) ?? options?.device ?? null;
+    const selectedDevice = queryDevice(rawUrl) ?? deviceFromPreviewPath(url, base) ?? options?.device ?? null;
     const devtoolsFrontendBase = base === "/" ? "/devtools-frontend" : `${base}/devtools-frontend`;
 
     // Same-origin proxy for Chrome DevTools frontend assets. Loading the
@@ -375,17 +419,18 @@ export function simMiddleware(options?: SimMiddlewareOptions) {
     }
 
     // Serve the preview page
-    if (url === base || url === base + "/") {
+    if (url === base || url === base + "/" || deviceFromPreviewPath(url, base)) {
       const states = readServeSimStates();
-      const state = selectServeSimState(states, selectedDevice);
+      const state = selectedDevice ? selectServeSimState(states, selectedDevice) : null;
       let html = loadHtml();
 
       if (state) {
         // Pass real serve-sim URLs directly. The client parses the MJPEG
         // stream via fetch() (CORS is fine — serve-sim sends Access-Control-Allow-Origin: *)
         // and connects to the WS directly (WS has no CORS).
+        const reachableState = browserReachableState(state, req);
         const config = JSON.stringify({
-          ...state,
+          ...reachableState,
           basePath: base,
           logsEndpoint: endpoint(base, "/logs", state.device),
           appStateEndpoint: endpoint(base, "/appstate", state.device),
@@ -393,6 +438,14 @@ export function simMiddleware(options?: SimMiddlewareOptions) {
           devtoolsEndpoint: endpoint(base, "/devtools", state.device),
         });
         const configScript = `<script>window.__SIM_PREVIEW__=${config}</script>`;
+        html = html.replace("<!--__SIM_PREVIEW_CONFIG__-->", configScript);
+      } else if (!selectedDevice) {
+        const streams = states.map((stream) => ({
+          ...browserReachableState(stream, req),
+          previewUrl: previewEndpoint(base, stream.device),
+        }));
+        const indexConfig = JSON.stringify({ basePath: base, streams });
+        const configScript = `<script>window.__SIM_PREVIEW_INDEX__=${indexConfig}</script>`;
         html = html.replace("<!--__SIM_PREVIEW_CONFIG__-->", configScript);
       }
 
@@ -512,7 +565,16 @@ export function simMiddleware(options?: SimMiddlewareOptions) {
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
       });
-      res.end(JSON.stringify(state || null));
+      if (selectedDevice) {
+        res.end(JSON.stringify(state ? browserReachableState(state, req) : null));
+      } else {
+        res.end(JSON.stringify({
+          streams: states.map((stream) => ({
+            ...browserReachableState(stream, req),
+            previewUrl: previewEndpoint(base, stream.device),
+          })),
+        }));
+      }
       return;
     }
 

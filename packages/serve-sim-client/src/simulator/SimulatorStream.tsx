@@ -52,7 +52,7 @@ export function SimulatorStream({ exec, device, style, imageStyle, className, st
   // start the relay stream automatically.
   useEffect(() => {
     if (relayMode && info && !prevInfo.current) {
-      stream.start({ maxFps: 30 });
+      stream.start({ maxFps: 30, device: info.device });
     }
     prevInfo.current = info;
   }, [info, relayMode, stream]);
@@ -97,7 +97,7 @@ export function SimulatorStream({ exec, device, style, imageStyle, className, st
               </button>
             )}
             {info ? (
-              <button onClick={() => { if (relayMode) stream.stop(); disconnect(); }} disabled={loading} style={btnStyle}>
+              <button onClick={() => { if (relayMode) stream.stop(info.device); disconnect(); }} disabled={loading} style={btnStyle}>
                 {loading ? "..." : "Disconnect"}
               </button>
             ) : (
@@ -107,7 +107,7 @@ export function SimulatorStream({ exec, device, style, imageStyle, className, st
                 console.log(`[serve-sim] connect() resolved (ok=${ok})`);
                 if (ok && relayMode) {
                   console.log(`[serve-sim] sending stream:start`);
-                  stream.start({ maxFps: 30 });
+                  stream.start({ maxFps: 30, device: device ?? undefined });
                 }
               }} disabled={loading} style={btnStyle}>
                 {loading ? "Connecting..." : "Connect"}
@@ -127,17 +127,18 @@ export function SimulatorStream({ exec, device, style, imageStyle, className, st
         <SimulatorView
           key={info.device}
           url={info.url}
+          wsUrl={info.wsUrl}
           style={fullscreen ? { width: "100%", flex: 1 } : { width: "100%" }}
           imageStyle={imageStyle}
-          onHomePress={() => relayMode ? stream.sendButton("home") : sendButton("home")}
+          onHomePress={() => relayMode ? stream.sendButton("home", info.device) : sendButton("home")}
           hideControls={headerless}
           onStreamingChange={onStreamingChange}
           onScreenConfigChange={onScreenConfigChange}
           connectionQuality={relayMode ? stream.connectionQuality ?? undefined : undefined}
           {...(relayMode ? {
-            onStreamTouch: stream.sendTouch,
-            onStreamMultiTouch: stream.sendMultiTouch,
-            onStreamButton: stream.sendButton,
+            onStreamTouch: (data) => stream.sendTouch(data, info.device),
+            onStreamMultiTouch: (data) => stream.sendMultiTouch(data, info.device),
+            onStreamButton: (button) => stream.sendButton(button, info.device),
             subscribeFrame: stream.subscribeFrame,
             streamFrame: stream.frame,
             streamConfig: stream.config,
@@ -166,7 +167,7 @@ export function SimulatorStream({ exec, device, style, imageStyle, className, st
               aria-label="Power on"
               onClick={async () => {
                 const ok = await connect();
-                if (ok && relayMode) stream.start({ maxFps: 30 });
+                if (ok && relayMode) stream.start({ maxFps: 30, device: device ?? undefined });
               }}
               style={{
                 background: "transparent",
